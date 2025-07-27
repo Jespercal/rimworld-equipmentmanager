@@ -33,7 +33,7 @@ namespace EquipmentManager
             {
                 if (_allRelevantThings == null || _allRelevantThings.Count == 0)
                 {
-                    var relevantStats = EquipmentManager.GetWorkTypeRules().SelectMany(rule => rule.RequiredStats)
+                    var relevantStats = EquipmentManager.GetWorkTypeRules().SelectMany(rule => rule.GetStatWeights().Select(e => e.StatDef))
                         .ToHashSet();
                     _allRelevantThings = new HashSet<ThingDef>(DefDatabase<ThingDef>.AllDefs.Where(def =>
                         def.IsWeapon && !def.destroyOnDrop && (def.statBases ?? new List<StatModifier>())
@@ -107,9 +107,9 @@ namespace EquipmentManager
             Initialize();
             var relevantStats = EquipmentManager.GetWorkTypeRules()
                 .Where(wtr => workTypeDefs.Any(wtd => wtd.defName == wtr.WorkTypeDefName))
-                .SelectMany(rule => rule.RequiredStats).ToHashSet();
+                .SelectMany(rule => rule.GetStatWeights()).ToHashSet();
             return GloballyAvailableItems.Where(def => (def.statBases ?? new List<StatModifier>())
-                .Union(def.equippedStatOffsets ?? new List<StatModifier>()).Any(sm => relevantStats.Contains(sm.stat)));
+                .Union(def.equippedStatOffsets ?? new List<StatModifier>()).Any(sm => relevantStats.Any(eh => eh.StatDef == sm.stat)));
         }
 
         public IEnumerable<ThingDef> GetGloballyAvailableItemsSorted(IReadOnlyCollection<WorkTypeDef> workTypeDefs,

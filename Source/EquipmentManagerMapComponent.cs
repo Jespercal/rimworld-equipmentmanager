@@ -6,6 +6,7 @@ using PeteTimesSix.SimpleSidearms;
 using PeteTimesSix.SimpleSidearms.Utilities;
 using RimWorld;
 using SimpleSidearms.rimworld;
+using UnityEngine;
 using Verse;
 using Verse.AI;
 
@@ -189,12 +190,44 @@ namespace EquipmentManager
 
         private void AssignToolsForWorkTypes(PawnCache pawn, ToolRule rule, List<WorkTypeDef> workTypes)
         {
+            EquipmentManager.LogMessage($"Tools for pawn: {pawn.Pawn.Name}");
             var sidearmMemory = CompSidearmMemory.GetMemoryCompForPawn(pawn.Pawn);
-            var availableWeapons = rule.GetCurrentlyAvailableItems(map, workTypes, _updateTime).ToList();
+            var availableWeapons = rule.GetCurrentlyAvailableItems(map, workTypes, _updateTime)
+                .ToList();
+
+            var sortedAvailableWeapons = new List<Thing>();
+            workTypes.ForEach(wt => sortedAvailableWeapons.AddRange(availableWeapons.Where(thing => rule.IsAvailable(thing, new List<WorkTypeDef>() { wt }, _updateTime))));
+            availableWeapons = sortedAvailableWeapons.Distinct().ToList();
+
+            EquipmentManager.LogMessage("Can use tools after sorting:");
+            foreach (var tool in availableWeapons)
+            {
+                EquipmentManager.LogMessage($"- {tool.LabelShort.Replace("\n", "|")}");
+            }
+
+            EquipmentManager.LogMessage("Can use tools before filter:");
+            foreach (var tool in availableWeapons)
+            {
+                EquipmentManager.LogMessage($"- {tool.LabelShort.Replace("\n", "|")}");
+            }
             _ = availableWeapons.RemoveAll(thing =>
                 _pawnCache.Any(pc => pc != pawn && pc.AssignedWeapons.ContainsKey(thing)));
+            EquipmentManager.LogMessage("Can use tools after pawn cache:");
+            foreach (var tool in availableWeapons)
+            {
+                EquipmentManager.LogMessage($"- {tool.LabelShort.Replace("\n", "|")}");
+            }
             _ = availableWeapons.RemoveAll(thing =>
-                !StatCalculator.CanPickupSidearmInstance((ThingWithComps) thing, pawn.Pawn, out _));
+            {
+                var val = !StatCalculator.CanPickupSidearmInstance((ThingWithComps) thing, pawn.Pawn, out var message);
+                if (val) { EquipmentManager.LogMessage($"Cannot pickup '{thing.LabelShort}': {message}"); }
+                return val;
+            });
+            EquipmentManager.LogMessage("Can use tools after canpickup:");
+            foreach (var tool in availableWeapons)
+            {
+                EquipmentManager.LogMessage($"- {tool.LabelShort.Replace("\n", "|")}");
+            }
             var carriedWeapons = pawn.Pawn.GetCarriedWeapons(true, true)
                 .Where(thing => rule.IsAvailable(thing, workTypes, _updateTime)).ToList();
             availableWeapons.AddRange(carriedWeapons);
@@ -202,12 +235,25 @@ namespace EquipmentManager
             {
                 _ = availableWeapons.RemoveAll(thing => thing.def.IsRangedWeapon);
             }
+            EquipmentManager.LogMessage("Can use tools after add own and remove ranged:");
+            foreach (var tool in availableWeapons)
+            {
+                EquipmentManager.LogMessage($"- {tool.LabelShort.Replace("\n", "|")}");
+            }
             _ = availableWeapons.RemoveAll(thing =>
                 !EquipmentUtility.CanEquip(thing, pawn.Pawn) ||
                 (pawn.Pawn.playerSettings.EffectiveAreaRestrictionInPawnCurrentMap != null &&
                     !pawn.Pawn.playerSettings.EffectiveAreaRestrictionInPawnCurrentMap[thing.Position]));
+
+            EquipmentManager.LogMessage("Can use tools:");
+            foreach (var tool in availableWeapons)
+            {
+                EquipmentManager.LogMessage($"- {tool.LabelShort.Replace("\n","|")}");
+            }
+
             foreach (var workType in workTypes)
             {
+                EquipmentManager.LogMessage($"- Worktype: {workType.defName}");
                 var things = availableWeapons.Where(thing => carriedWeapons.Contains(thing) ||
                     StatCalculator.CanPickupSidearmInstance((ThingWithComps) thing, pawn.Pawn, out _)).ToList();
                 var bestWeapon = things
@@ -224,6 +270,7 @@ namespace EquipmentManager
                 }
                 else
                 {
+                    EquipmentManager.LogMessage($"-- Equipping: {bestWeapon.GetTooltip().text}");
                     _ = pawn.Pawn.jobs.TryTakeOrderedJob(
                         JobMaker.MakeJob(SidearmsDefOf.EquipSecondary, (LocalTargetInfo) bestWeapon),
                         requestQueueing: ShouldRequestQueueing(pawn));
@@ -239,7 +286,7 @@ namespace EquipmentManager
             var mapTime = RimworldTime.GetMapTime(map);
             var hoursPassed = ((mapTime.Year - _updateTime.Year) * 60 * 24) + ((mapTime.Day - _updateTime.Day) * 24) +
                 mapTime.Hour - _updateTime.Hour;
-            if (hoursPassed < 6f) { return; }
+            if (hoursPassed < 3f) { return; }
             _updateTime.Year = mapTime.Year;
             _updateTime.Day = mapTime.Day;
             _updateTime.Hour = mapTime.Hour;
@@ -592,12 +639,16 @@ namespace EquipmentManager
                     case ItemRule.ToolEquipMode.OneForEveryWorkType:
                         AssignToolsForWorkTypes(pawn, rule,
                             WorkTypeDefsUtility.WorkTypeDefsInPriorityOrder
-                                .Where(wt => wt.visible && !pawn.Pawn.WorkTypeIsDisabled(wt)).ToList());
+                                .Where(wt => wt.visible && !pawn.Pawn.WorkTypeIsDisabled(wt))
+                                .OrderBy(e => pawn.Pawn.workSettings.GetPriority(e))
+                                .ToList());
                         break;
                     case ItemRule.ToolEquipMode.OneForEveryAssignedWorkType:
                         AssignToolsForWorkTypes(pawn, rule,
                             WorkTypeDefsUtility.WorkTypeDefsInPriorityOrder
-                                .Where(wt => wt.visible && pawn.Pawn.workSettings.WorkIsActive(wt)).ToList());
+                                .Where(wt => wt.visible && pawn.Pawn.workSettings.WorkIsActive(wt))
+                                .OrderBy(e => pawn.Pawn.workSettings.GetPriority(e))
+                                .ToList());
                         break;
                     case ItemRule.ToolEquipMode.BestOne:
                         AssignBestTool(pawn, rule);
